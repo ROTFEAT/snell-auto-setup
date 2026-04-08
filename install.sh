@@ -135,6 +135,56 @@ EOF
     ok "systemd service created and started"
 }
 
+# ── Firewall configuration ───────────────────────────────────
+configure_firewall() {
+    info "Checking firewall status..."
+
+    # --- ufw ---
+    if command -v ufw &> /dev/null; then
+        local ufw_status
+        ufw_status=$(ufw status 2>/dev/null | head -1)
+        if [[ "$ufw_status" == *"active"* ]]; then
+            info "ufw is active, opening port ${PORT}/tcp and ${PORT}/udp..."
+            ufw allow "${PORT}/tcp" > /dev/null 2>&1
+            ufw allow "${PORT}/udp" > /dev/null 2>&1
+            ok "ufw: port ${PORT} opened (tcp+udp)"
+        else
+            info "ufw is installed but inactive, skipping"
+        fi
+    fi
+
+    # --- firewalld ---
+    if command -v firewall-cmd &> /dev/null; then
+        if systemctl is-active --quiet firewalld 2>/dev/null; then
+            info "firewalld is active, opening port ${PORT}..."
+            firewall-cmd --permanent --add-port="${PORT}/tcp" > /dev/null 2>&1
+            firewall-cmd --permanent --add-port="${PORT}/udp" > /dev/null 2>&1
+            firewall-cmd --reload > /dev/null 2>&1
+            ok "firewalld: port ${PORT} opened (tcp+udp)"
+        fi
+    fi
+
+    # --- iptables (no ufw/firewalld) ---
+    if ! command -v ufw &> /dev/null && ! command -v firewall-cmd &> /dev/null; then
+        if command -v iptables &> /dev/null; then
+            local rule_count
+            rule_count=$(iptables -L INPUT --line-numbers 2>/dev/null | wc -l)
+            if [[ "$rule_count" -gt 3 ]]; then
+                info "iptables rules detected, adding port ${PORT}..."
+                iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+                iptables -I INPUT -p udp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+                # Persist with iptables-save if available
+                if command -v iptables-save &> /dev/null; then
+                    iptables-save > /etc/iptables.rules 2>/dev/null || true
+                fi
+                ok "iptables: port ${PORT} opened (tcp+udp)"
+            else
+                info "iptables has no restrictive rules, skipping"
+            fi
+        fi
+    fi
+}
+
 # ── UDP performance tuning ───────────────────────────────────
 tune_udp() {
     sysctl -w net.core.rmem_max=26214400 > /dev/null 2>&1
@@ -170,6 +220,21 @@ print_summary() {
     echo -e "  Surge Proxy Line:"
     echo -e "  ${YELLOW}MySnell = snell, ${ip}, ${PORT}, psk=${PSK}, version=5${NC}"
     echo ""
+    echo -e "${YELLOW}════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}  REMINDER: Cloud Security Group / Firewall${NC}"
+    echo -e "${YELLOW}════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  If your server is on a cloud platform, make sure to"
+    echo -e "  open port ${CYAN}${PORT}${NC} (TCP+UDP) in your security group:"
+    echo ""
+    echo -e "  ${CYAN}AWS${NC}:    EC2 -> Security Groups -> Inbound Rules -> Add ${PORT}/tcp+udp"
+    echo -e "  ${CYAN}GCP${NC}:    VPC Network -> Firewall -> Create rule -> tcp/udp:${PORT}"
+    echo -e "  ${CYAN}Azure${NC}:  NSG -> Inbound Security Rules -> Add ${PORT}/tcp+udp"
+    echo -e "  ${CYAN}Alibaba${NC}: ECS -> Security Group -> Add ${PORT}/tcp+udp"
+    echo -e "  ${CYAN}Tencent${NC}: CVM -> Security Group -> Add ${PORT}/tcp+udp"
+    echo -e "  ${CYAN}Vultr${NC}:  Firewall -> Add rule -> ${PORT}/tcp+udp"
+    echo -e "  ${CYAN}DigitalOcean${NC}: Networking -> Firewalls -> Add ${PORT}/tcp+udp"
+    echo ""
 }
 
 # ── Main ─────────────────────────────────────────────────────
@@ -187,6 +252,7 @@ main() {
     install_snell
     generate_config
     create_service
+    configure_firewall
     tune_udp
     print_summary
 }
