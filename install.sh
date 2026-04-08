@@ -67,6 +67,44 @@ random_psk() {
     openssl rand -base64 32 | tr -d '/+=' | head -c 32
 }
 
+# ── Check existing installation ──────────────────────────────
+# Sets: EXISTING_VERSION, NEED_DOWNLOAD, NEED_CONFIG
+check_existing() {
+    EXISTING_VERSION=""
+    NEED_DOWNLOAD=true
+    NEED_CONFIG=true
+
+    # Check if binary exists
+    if [[ -f "$BIN_PATH" ]]; then
+        # Try to get version from the binary
+        EXISTING_VERSION=$("$BIN_PATH" --version 2>/dev/null | grep -oP 'v[\d.]+' || echo "unknown")
+        info "Existing snell-server found: ${EXISTING_VERSION}"
+
+        if [[ "$EXISTING_VERSION" == "$SNELL_VERSION" ]]; then
+            info "Already at target version ${SNELL_VERSION}, skipping download"
+            NEED_DOWNLOAD=false
+        else
+            warn "Installed: ${EXISTING_VERSION} -> upgrading to ${SNELL_VERSION}"
+            # Stop service before upgrading binary
+            systemctl stop snell 2>/dev/null || true
+        fi
+    fi
+
+    # Check if config exists — preserve port & PSK on reinstall/upgrade
+    if [[ -f "$CONF_PATH" ]]; then
+        local existing_port existing_psk
+        existing_port=$(grep -oP '(?<=::0:)\d+' "$CONF_PATH" 2>/dev/null || true)
+        existing_psk=$(grep -oP '(?<=psk = ).+' "$CONF_PATH" 2>/dev/null || true)
+
+        if [[ -n "$existing_port" && -n "$existing_psk" ]]; then
+            PORT="$existing_port"
+            PSK="$existing_psk"
+            NEED_CONFIG=false
+            ok "Existing config preserved (port: ${PORT}, psk: ${PSK:0:6}...)"
+        fi
+    fi
+}
+
 # ── Install dependencies ─────────────────────────────────────
 install_deps() {
     info "Installing dependencies..."
@@ -77,6 +115,10 @@ install_deps() {
 
 # ── Download & install Snell server ──────────────────────────
 install_snell() {
+    if [[ "$NEED_DOWNLOAD" == false ]]; then
+        return
+    fi
+
     local url="https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-${ARCH}.zip"
     local tmpdir
     tmpdir=$(mktemp -d)
@@ -95,6 +137,10 @@ install_snell() {
 
 # ── Generate config ──────────────────────────────────────────
 generate_config() {
+    if [[ "$NEED_CONFIG" == false ]]; then
+        return
+    fi
+
     PORT=$(random_port)
     PSK=$(random_psk)
 
@@ -202,9 +248,16 @@ print_summary() {
     local ip
     ip=$(curl -s4 --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
 
+    local action_msg="Deployed Successfully!"
+    if [[ -n "$EXISTING_VERSION" && "$EXISTING_VERSION" != "$SNELL_VERSION" ]]; then
+        action_msg="Upgraded ${EXISTING_VERSION} -> ${SNELL_VERSION}!"
+    elif [[ "$NEED_DOWNLOAD" == false && "$NEED_CONFIG" == false ]]; then
+        action_msg="Already Up-to-Date (verified)"
+    fi
+
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Snell Server ${SNELL_VERSION} Deployed Successfully!${NC}"
+    echo -e "${GREEN}  Snell Server ${SNELL_VERSION} ${action_msg}${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "  Server IP:    ${CYAN}${ip}${NC}"
@@ -248,6 +301,7 @@ main() {
 
     check_os
     detect_arch
+    check_existing
     install_deps
     install_snell
     generate_config
