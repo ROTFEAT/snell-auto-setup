@@ -309,9 +309,9 @@ verify_status() {
             if ufw status 2>/dev/null | grep -qE "${PORT}/(tcp|udp)"; then
                 ok "Firewall:  ufw rule for port ${PORT} exists"
             else
-                err_noexit "Firewall:  ufw is active but port ${PORT} is NOT allowed"
-                fw_ok=false
-                all_ok=false
+                warn "Firewall:  unable to verify ufw rule for port ${PORT}"
+                echo -e "             Please run manually:"
+                echo -e "             ${CYAN}sudo ufw allow ${PORT}/tcp && sudo ufw allow ${PORT}/udp${NC}"
             fi
         fi
     fi
