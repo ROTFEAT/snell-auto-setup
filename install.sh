@@ -19,6 +19,7 @@ info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+err_noexit() { echo -e "${RED}[FAIL]${NC}  $*"; }
 
 # ── Root check ───────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && err "Please run as root: sudo bash $0"
@@ -243,6 +244,87 @@ tune_udp() {
     ok "UDP buffer tuning applied"
 }
 
+# ── Verify service & port ────────────────────────────────────
+verify_status() {
+    local all_ok=true
+
+    info "Running health checks..."
+
+    # 1. systemd service status
+    if systemctl is-active --quiet snell 2>/dev/null; then
+        ok "Service:   snell is running"
+    else
+        warn "Service:   snell is NOT running"
+        info "Attempting to restart..."
+        systemctl restart snell 2>/dev/null || true
+        sleep 1
+        if systemctl is-active --quiet snell 2>/dev/null; then
+            ok "Service:   snell restarted successfully"
+        else
+            err_noexit "Service:   snell failed to start — check: journalctl -u snell"
+            all_ok=false
+        fi
+    fi
+
+    # 2. Port listening check
+    sleep 1
+    if ss -tlnp | grep -q ":${PORT} "; then
+        ok "Port:      ${PORT}/tcp is listening"
+    else
+        err_noexit "Port:      ${PORT}/tcp is NOT listening"
+        all_ok=false
+    fi
+
+    # 3. Firewall rules check
+    local fw_ok=true
+    if command -v ufw &> /dev/null; then
+        local ufw_status
+        ufw_status=$(ufw status 2>/dev/null | head -1)
+        if [[ "$ufw_status" == *"active"* ]]; then
+            if ufw status 2>/dev/null | grep -q "${PORT}"; then
+                ok "Firewall:  ufw rule for port ${PORT} exists"
+            else
+                err_noexit "Firewall:  ufw is active but port ${PORT} is NOT allowed"
+                fw_ok=false
+                all_ok=false
+            fi
+        fi
+    fi
+
+    if command -v firewall-cmd &> /dev/null && systemctl is-active --quiet firewalld 2>/dev/null; then
+        if firewall-cmd --list-ports 2>/dev/null | grep -q "${PORT}"; then
+            ok "Firewall:  firewalld rule for port ${PORT} exists"
+        else
+            err_noexit "Firewall:  firewalld is active but port ${PORT} is NOT allowed"
+            fw_ok=false
+            all_ok=false
+        fi
+    fi
+
+    if ! command -v ufw &> /dev/null && ! command -v firewall-cmd &> /dev/null; then
+        if command -v iptables &> /dev/null; then
+            local rule_count
+            rule_count=$(iptables -L INPUT --line-numbers 2>/dev/null | wc -l)
+            if [[ "$rule_count" -gt 3 ]]; then
+                if iptables -C INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null; then
+                    ok "Firewall:  iptables rule for port ${PORT} exists"
+                else
+                    err_noexit "Firewall:  iptables has rules but port ${PORT} is NOT allowed"
+                    fw_ok=false
+                    all_ok=false
+                fi
+            fi
+        fi
+    fi
+
+    # Return status for summary
+    if [[ "$all_ok" == true ]]; then
+        HEALTH_STATUS="ALL_OK"
+    else
+        HEALTH_STATUS="HAS_ISSUES"
+    fi
+}
+
 # ── Print summary ────────────────────────────────────────────
 print_summary() {
     local ip
@@ -264,6 +346,11 @@ print_summary() {
     echo -e "  Port:         ${CYAN}${PORT}${NC}"
     echo -e "  PSK:          ${CYAN}${PSK}${NC}"
     echo -e "  Version:      ${CYAN}5${NC}"
+    if [[ "$HEALTH_STATUS" == "ALL_OK" ]]; then
+        echo -e "  Health:       ${GREEN}ALL CHECKS PASSED${NC}"
+    else
+        echo -e "  Health:       ${RED}ISSUES DETECTED (see above)${NC}"
+    fi
     echo ""
     echo -e "  Config:       ${CONF_PATH}"
     echo -e "  Service:      systemctl {start|stop|restart|status} snell"
@@ -308,6 +395,7 @@ main() {
     create_service
     configure_firewall
     tune_udp
+    verify_status
     print_summary
 }
 
