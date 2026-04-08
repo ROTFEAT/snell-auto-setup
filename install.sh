@@ -383,7 +383,7 @@ print_summary() {
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "  Surge Proxy Line:"
-    echo -e "  ${YELLOW}MySnell = snell, ${ip}, ${PORT}, psk=${PSK}, version=5${NC}"
+    echo -e "  ${YELLOW}MySnell = snell, ${ip}, ${PORT}, psk=${PSK}, version=5s${NC}"
     echo ""
     echo -e "${YELLOW}════════════════════════════════════════════════════${NC}"
     echo -e "${YELLOW}  REMINDER: Cloud Security Group / Firewall${NC}"

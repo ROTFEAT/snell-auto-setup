@@ -44,7 +44,7 @@ Existing config (`/etc/snell-server.conf`) is never overwritten — your client-
   Health:       ALL CHECKS PASSED
 
   Surge Proxy Line:
-  MySnell = snell, 203.0.113.1, 38472, psk=AbCdEfGhIjKlMnOpQrStUvWx12345678, version=5
+  MySnell = snell, 203.0.113.1, 38472, psk=AbCdEfGhIjKlMnOpQrStUvWx12345678, version=5s
 
 ════════════════════════════════════════════════════
   REMINDER: Cloud Security Group / Firewall
