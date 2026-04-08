@@ -79,8 +79,14 @@ check_existing() {
 
     # Check if binary exists
     if [[ -f "$BIN_PATH" ]]; then
-        # Try to get version from the binary
-        EXISTING_VERSION=$("$BIN_PATH" --version 2>/dev/null | grep -oP 'v[\d.]+' || echo "unknown")
+        # Try to get version from the binary (try multiple methods)
+        EXISTING_VERSION=$("$BIN_PATH" --version 2>&1 | grep -oP 'v[\d.]+' || true)
+        if [[ -z "$EXISTING_VERSION" ]]; then
+            EXISTING_VERSION=$("$BIN_PATH" -v 2>&1 | grep -oP 'v[\d.]+' || true)
+        fi
+        if [[ -z "$EXISTING_VERSION" ]]; then
+            EXISTING_VERSION="unknown"
+        fi
         info "Existing snell-server found: ${EXISTING_VERSION}"
 
         if [[ "$EXISTING_VERSION" == "$SNELL_VERSION" ]]; then
@@ -103,6 +109,8 @@ check_existing() {
             PORT="$existing_port"
             PSK="$existing_psk"
             NEED_CONFIG=false
+            # Fix permission if needed (service runs as nobody)
+            chmod 644 "$CONF_PATH"
             ok "Existing config preserved (port: ${PORT}, psk: ${PSK:0:6}...)"
         fi
     fi
@@ -167,7 +175,7 @@ psk = ${PSK}
 dns = 1.1.1.1, 8.8.8.8, 2001:4860:4860::8888
 EOF
 
-    chmod 600 "$CONF_PATH"
+    chmod 644 "$CONF_PATH"
     ok "Config written to ${CONF_PATH}"
 }
 
@@ -193,7 +201,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable snell > /dev/null 2>&1
-    systemctl restart snell
+    systemctl restart snell 2>/dev/null || true
     ok "systemd service created and started"
 }
 
@@ -207,9 +215,11 @@ configure_firewall() {
         ufw_status=$(ufw status 2>/dev/null | head -1)
         if [[ "$ufw_status" == *"active"* ]]; then
             info "ufw is active, opening port ${PORT}/tcp and ${PORT}/udp..."
-            ufw allow "${PORT}/tcp" > /dev/null 2>&1
-            ufw allow "${PORT}/udp" > /dev/null 2>&1
-            ok "ufw: port ${PORT} opened (tcp+udp)"
+            if ufw allow "${PORT}/tcp" > /dev/null 2>&1 && ufw allow "${PORT}/udp" > /dev/null 2>&1; then
+                ok "ufw: port ${PORT} opened (tcp+udp)"
+            else
+                warn "ufw: failed to open port ${PORT}, try manually: ufw allow ${PORT}"
+            fi
         else
             info "ufw is installed but inactive, skipping"
         fi
@@ -296,7 +306,7 @@ verify_status() {
         local ufw_status
         ufw_status=$(ufw status 2>/dev/null | head -1)
         if [[ "$ufw_status" == *"active"* ]]; then
-            if ufw status 2>/dev/null | grep -q "${PORT}"; then
+            if ufw status 2>/dev/null | grep -qE "${PORT}/(tcp|udp)"; then
                 ok "Firewall:  ufw rule for port ${PORT} exists"
             else
                 err_noexit "Firewall:  ufw is active but port ${PORT} is NOT allowed"
