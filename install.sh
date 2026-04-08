@@ -11,6 +11,8 @@ SNELL_VERSION="v5.0.1"
 CONF_PATH="/etc/snell-server.conf"
 SERVICE_PATH="/lib/systemd/system/snell.service"
 BIN_PATH="/usr/local/bin/snell-server"
+GITHUB_BASE="https://github.com/ROTFEAT/snell-auto-setup/releases/download/${SNELL_VERSION}"
+ORIGIN_BASE="https://dl.nssurge.com/snell"
 
 # ── Colors ───────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -120,13 +122,26 @@ install_snell() {
         return
     fi
 
-    local url="https://dl.nssurge.com/snell/snell-server-${SNELL_VERSION}-linux-${ARCH}.zip"
+    local filename="snell-server-${SNELL_VERSION}-linux-${ARCH}.zip"
+    local github_url="${GITHUB_BASE}/${filename}"
+    local origin_url="${ORIGIN_BASE}/${filename}"
     local tmpdir
     tmpdir=$(mktemp -d)
 
     info "Downloading snell-server ${SNELL_VERSION}..."
-    wget -q --show-progress -O "${tmpdir}/snell-server.zip" "$url" \
-        || err "Download failed. Check network or URL: $url"
+    # Try GitHub mirror first, fallback to original source
+    if wget -q --show-progress -O "${tmpdir}/snell-server.zip" "$github_url" 2>/dev/null; then
+        ok "Downloaded from GitHub mirror"
+    elif wget -q --show-progress -O "${tmpdir}/snell-server.zip" "$origin_url" 2>/dev/null; then
+        ok "Downloaded from original source (GitHub mirror unavailable)"
+    elif curl -fSL -o "${tmpdir}/snell-server.zip" "$github_url" 2>/dev/null; then
+        ok "Downloaded from GitHub mirror (via curl)"
+    elif curl -fSL -o "${tmpdir}/snell-server.zip" "$origin_url" 2>/dev/null; then
+        ok "Downloaded from original source (via curl)"
+    else
+        rm -rf "$tmpdir"
+        err "Download failed from all sources. Check your network."
+    fi
 
     info "Installing to ${BIN_PATH}..."
     unzip -o -q "${tmpdir}/snell-server.zip" -d "${tmpdir}"

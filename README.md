@@ -1,6 +1,6 @@
 # Snell Server Auto-Setup
 
-One-command script to deploy [Snell](https://manual.nssurge.com/others/snell.html) proxy server (v5.0.1) on Ubuntu/Debian.
+One-command script to deploy [Snell](https://manual.nssurge.com/others/snell.html) proxy server (v5.0.1) on Ubuntu/Debian and derivatives.
 
 ## Quick Start
 
@@ -69,7 +69,8 @@ sudo cat /etc/snell-server.conf  # View config
 
 ## Requirements
 
-- Ubuntu or Debian
+- Linux with systemd (Ubuntu, Debian, and derivatives like Mint, Pop!_OS, Armbian, Kali, etc.)
+- Supported architectures: amd64, i386, aarch64, armv7l
 - Root access
 
 ## License
